@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Deadzone - Lane Runner</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{background:#0a0a12;color:#fff;font-family: 'Segoe UI',system-ui,sans-serif;overflow:hidden;touch-action:none}
+  #gameWrap{position:relative;width:100vw;height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;background:linear-gradient(#0a0a12,#1a1025)}
+  #hud{position:absolute;top:0;left:0;right:0;display:flex;justify-content:space-between;padding:10px 12px;font-weight:700;z-index:5;background:linear-gradient(to bottom, rgba(0,0,0,.8), transparent)}
+  #hud div{display:flex;gap:12px;font-size:14px}
+  #canvas{border:2px solid #2a2a40;border-radius:12px;box-shadow:0 12px 40px rgba(0,0,0,.6);background:#0f0f18;touch-action:none}
+  #overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(5,5,15,.88);z-index:10;flex-direction:column;gap:16px;padding:24px;text-align:center}
+  #overlay.hidden{display:none}
+  .btn{padding:12px 28px;border:none;border-radius:999px;font-weight:800;cursor:pointer;font-size:16px;transition:.2s}
+  .btn-primary{background:#9c4dff;color:#fff;box-shadow:0 6px 20px rgba(156,77,255,.4)}
+  .btn-primary:hover{transform:scale(1.03)}
+  .btn-secondary{background:#1e1e30;color:#fff;border:1px solid #3a3a55}
+  #controls{position:absolute;bottom:10px;left:0;right:0;display:flex;justify-content:space-between;padding:0 12px;gap:10px;z-index:5}
+  .ctl{flex:1;padding:14px 0;border-radius:12px;border:1px solid #2a2a55;background:rgba(30,30,50,.6);color:#fff;font-weight:800;backdrop-filter:blur(6px)}
+  .ctl:active{background:rgba(156,77,255,.3)}
+  #buff{position:absolute;top:48px;left:50%;transform:translateX(-50%);background:#ff3b3b;color:#fff;padding:6px 14px;border-radius:999px;font-weight:800;display:none;z-index:6}
+  h1{font-size:32px;letter-spacing:.04em}
+  .sub{opacity:.8;font-size:14px;max-width:360px}
+  .stats{display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:14px;text-align:left;width:100%;max-width:360px}
+  .stat{background:rgba(255,255,255,.08);padding:10px 12px;border-radius:10px}
+  .k{opacity:.7;font-size:12px}
+</style>
+</head>
+<body>
+<div id="gameWrap">
+  <div id="hud">
+    <div>
+      <span id="score">Score 0</span>
+      <span id="metal">Metal 0</span>
+      <span id="food">Food 0</span>
+    </div>
+    <div>
+      <span id="ammo">Ammo 100</span>
+      <span id="hp">HP 100</span>
+    </div>
+  </div>
+  <div id="buff">x2 DAMAGE!</div>
+  <canvas id="canvas" width="360" height="640"></canvas>
+  <div id="controls">
+    <button class="ctl" id="leftBtn">◀ LEFT</button>
+    <button class="ctl" id="shootBtn">▲ SHOOT</button>
+    <button class="ctl" id="rightBtn">RIGHT ▶</button>
+  </div>
+  <div id="overlay">
+    <h1>🧟 DEADZONE</h1>
+    <p class="sub">Swipe or use ← → to switch 3 lanes. Shoot barrels for loot. Survive the horde!</p>
+    <div style="font-size:13px;opacity:.9">← → / Swipe / Tap halves to move • Space / Tap SHOOT</div>
+    <button class="btn btn-primary" id="playBtn">PLAY</button>
+    <div style="font-size:12px;opacity:.6">Godot prototype → Web Export • Connected to survival-api-w6cr.onrender.com</div>
+  </div>
+</div>
+<script>
+// === Vertical 3-Lane Runner — JS port of Godot logic ===
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const hud = {
+  score: document.getElementById('score'),
+  metal: document.getElementById('metal'),
+  food: document.getElementById('food'),
+  ammo: document.getElementById('ammo'),
+  hp: document.getElementById('hp'),
+  buff: document.getElementById('buff'),
+  overlay: document.getElementById('overlay')
+};
+const W = 360, H = 640;
+const LANES = 3, LANE_W = 120;
+const laneX = i => (i -1)*LANE_W + W/2; // middle centered
+
+let state = {
+  lane:1, targetX: laneX(1), x: laneX(1), y: H-90, isSwitching:false,
+  hp:100, maxHp:100, ammo:100, metal:0, food:0, score:0,
+  damage:25, buffMult:1, buffTimer:0,
+  zombiesKilled:0, barrelsBroken:0,
+  running:false, gameOver:false, time:0
+};
+let bullets=[], enemies=[], barrels=[], particles=[], floats=[];
+let spawnTimer=0, spawnInterval=0.9, difficulty=0;
+
+function reset(){
+  state.lane=1; state.targetX=laneX(1); state.x=laneX(1); state.isSwitching=false;
+  state.hp=100; state.ammo=100; state.metal=0; state.food=0; state.score=0;
+  state.damage=25; state.buffMult=1; state.buffTimer=0; state.zombiesKilled=0; state.barrelsBroken=0; state.time=0;
+  state.gameOver=false; bullets=[]; enemies=[]; barrels=[]; particles=[]; floats=[];
+  spawnTimer=0.8; spawnInterval=0.9; difficulty=0;
+  hud.overlay.classList.add('hidden');
+  hud.overlay.innerHTML = `<h1>🧟 DEADZONE</h1><p class="sub">Swipe or use ← → to switch 3 lanes.</p><div style="font-size:13px;opacity:.9">← → / Swipe / Tap halves • Space / SHOOT</div><button class="btn btn-primary" id="playBtn">PLAY</button>`;
+  document.getElementById('playBtn')?.addEventListener('click', start);
+  updateHUD();
+}
+
+function start(){
+  reset(); state.running=true;
+}
+function tryLane(dir){
+  if(state.isSwitching || state.gameOver) return;
+  let nl = Math.max(0, Math.min(LANES-1, state.lane+dir));
+  if(nl===state.lane) return;
+  state.lane=nl; state.targetX=laneX(nl); state.isSwitching=true;
+  // tween
+  let startX=state.x, dur=0.18, t0=performance.now();
+  function animate(){
+    let p = Math.min(1, (performance.now()-t0)/ (dur*1000));
+    let eased = 1 - Math.pow(1-p,3);
+    state.x = startX + (state.targetX-startX)*eased;
+    if(p<1) requestAnimationFrame(animate); else { state.x=state.targetX; state.isSwitching=false; }
+  }
+  requestAnimationFrame(animate);
+}
+
+function shoot(){
+  if(!state.running || state.gameOver || state.ammo<=0) return;
+  state.ammo--; updateHUD();
+  bullets.push({x:state.x, y:state.y-30, vy:-900, dmg: state.damage*state.buffMult, lane:state.lane});
+}
+
+function lootPool(){
+  return [
+    {type:'ammo', val:50, label:'+50 Ammo', hp:30, color:'#ffcc00'},
+    {type:'metal', val:20, label:'+20 Metal', hp:25, color:'#a0aec0'},
+    {type:'food', val:15, label:'+15 Food', hp:25, color:'#4ade80'},
+    {type:'damage_x', val:2, label:'x2 DAMAGE', hp:40, color:'#ff3b3b', dur:5},
+    {type:'heal', val:25, label:'+25 HP', hp:30, color:'#22d3ee'},
+    {type:'ammo', val:100, label:'+100 Ammo', hp:45, color:'#ffcc00'},
+  ];
+}
+
+function spawn(){
+  let r=Math.random(), lane=Math.floor(Math.random()*LANES), x=laneX(lane), y=-40;
+  if(r<0.30){
+    enemies.push({kind:'obstacle', x,y, vy: 320 + difficulty*12, w:64,h:36, hp:999, dmg:25});
+  } else if(r<0.65){
+    enemies.push({kind:'zombie', x,y, vy: 220 + difficulty*10, w:44,h:56, hp:50, maxHp:50, sway:Math.random()*Math.PI*2, dmg:20});
+  } else {
+    let loot = lootPool()[Math.floor(Math.random()*lootPool().length)];
+    barrels.push({x,y, vy:200, w:70,h:42, hp:loot.hp, maxHp:loot.hp, loot, hitFlash:0});
+  }
+}
+
+function updateHUD(){
+  hud.score.textContent=`Score ${state.score}`;
+  hud.metal.textContent=`Metal ${state.metal}`;
+  hud.food.textContent=`Food ${state.food}`;
+  hud.ammo.textContent=`Ammo ${state.ammo}`;
+  hud.hp.textContent=`HP ${state.hp}`;
+  hud.hp.style.color = state.hp<30? '#ff3b3b' : '#fff';
+  if(state.buffTimer>0){
+    hud.buff.style.display='block'; hud.buff.textContent=`x${state.buffMult} DAMAGE ${Math.ceil(state.buffTimer)}s`;
+  } else hud.buff.style.display='none';
+}
+
+let keys={};
+window.addEventListener('keydown', e=>{
+  if(e.key==='ArrowLeft') tryLane(-1);
+  if(e.key==='ArrowRight') tryLane(1);
+  if(e.key===' '){ e.preventDefault(); shoot(); }
+  if(e.key==='Escape' && state.running) state.running=!state.running;
+});
+document.getElementById('leftBtn').addEventListener('click', ()=>tryLane(-1));
+document.getElementById('rightBtn').addEventListener('click', ()=>tryLane(1));
+document.getElementById('shootBtn').addEventListener('click', shoot);
+
+// Touch swipe + tap halves
+let touchStartX=0;
+canvas.addEventListener('touchstart', e=>{
+  touchStartX=e.touches[0].clientX; e.preventDefault();
+},{passive:false});
+canvas.addEventListener('touchend', e=>{
+  let dx=(e.changedTouches[0].clientX-touchStartX);
+  if(Math.abs(dx)>40) tryLane(dx>0?1:-1);
+  else {
+    // tap: bottom half shoot, top halves still lane
+    let rect=canvas.getBoundingClientRect();
+    let x = e.changedTouches[0].clientX - rect.left;
+    if(e.changedTouches[0].clientY - rect.top > rect.height*0.6) shoot();
+    else if(x < W/2 - 30) tryLane(-1); else if(x > W/2+30) tryLane(1);
+  }
+  e.preventDefault();
+},{passive:false});
+canvas.addEventListener('click', e=>{
+  let rect=canvas.getBoundingClientRect();
+  let x=e.clientX-rect.left;
+  if(e.clientY-rect.top > rect.height*0.6) shoot();
+  else if(x < W/2-30) tryLane(-1); else if(x> W/2+30) tryLane(1);
+});
+
+let last=performance.now();
+function loop(now){
+  requestAnimationFrame(loop);
+  let dt=Math.min(0.033, (now-last)/1000); last=now;
+  if(!state.running || state.gameOver) { draw(); return; }
+  state.time+=dt; difficulty+=dt*0.02;
+  if(state.buffTimer>0){ state.buffTimer-=dt; if(state.buffTimer<=0){ state.buffMult=1; updateHUD(); } }
+
+  // spawn
+  spawnTimer-=dt;
+  if(spawnTimer<=0){ spawn(); let ramp=Math.min(0.6,difficulty*0.02); spawnTimer=Math.max(0.3, 0.9 - ramp + Math.random()*0.6); }
+
+  // bullets
+  for(let i=bullets.length-1;i>=0;i--){
+    let b=bullets[i]; b.y+=b.vy*dt;
+    if(b.y<-20) bullets.splice(i,1);
+  }
+  // enemies & barrels fall
+  for(let e of enemies) { e.y+=e.vy*dt; if(e.kind==='zombie'){ e.x+=Math.sin(state.time*2 + e.sway)*0.4; } }
+  for(let b of barrels) { b.y+=b.vy*dt; if(b.hitFlash>0) b.hitFlash-=dt; }
+  enemies = enemies.filter(e=> e.y < H+100);
+  barrels = barrels.filter(b=> b.y < H+100);
+
+  // collisions: bullets vs enemies/barrels
+  for(let i=bullets.length-1;i>=0;i--){
+    let b=bullets[i];
+    for(let j=enemies.length-1;j>=0;j--){
+      let e=enemies[j];
+      if(Math.abs(b.x-e.x)< (e.w/2+8) && Math.abs(b.y-e.y)< (e.h/2+8)){
+        // hit
+        if(e.kind==='zombie'){ e.hp-=b.dmg; if(e.hp<=0){ enemies.splice(j,1); state.score+=10; state.metal+=5; state.zombiesKilled++; floats.push({x:e.x,y:e.y,text:'+10', c:'#ffcc00', t:0}); } }
+        bullets.splice(i,1); break;
+      }
+    }
+    if(i>=bullets.length) continue;
+    for(let j=barrels.length-1;j>=0;j--){
+      let br=barrels[j];
+      if(Math.abs(b.x-br.x)< (br.w/2+10) && Math.abs(b.y-br.y)< (br.h/2+10)){
+        br.hp-=b.dmg; br.hitFlash=0.15;
+        if(br.hp<=0){
+          // buff
+          let loot=br.loot;
+          if(loot.type==='ammo') state.ammo+=loot.val;
+          else if(loot.type==='metal') state.metal+=loot.val;
+          else if(loot.type==='food') state.food+=loot.val;
+          else if(loot.type==='heal') state.hp=Math.min(state.maxHp, state.hp+loot.val);
+          else if(loot.type==='damage_x'){ state.buffMult=loot.val; state.buffTimer=loot.dur||5; }
+          state.barrelsBroken++; state.score+=5;
+          floats.push({x:br.x,y:br.y,text:loot.label, c:loot.color, t:0});
+          particles.push({x:br.x,y:br.y,t:0, n:14});
+          barrels.splice(j,1);
+        }
+        bullets.splice(i,1); updateHUD(); break;
+      }
+    }
+  }
+  // player collision with enemies/barrels
+  for(let j=enemies.length-1;j>=0;j--){
+    let e=enemies[j];
+    if(Math.abs(state.x-e.x)< (e.w/2+20) && Math.abs(state.y-e.y)< (e.h/2+18)){
+      state.hp-=e.dmg; enemies.splice(j,1); shake(0.3,8); updateHUD();
+      if(state.hp<=0) gameOver();
+    }
+  }
+  for(let br of barrels){
+    if(Math.abs(state.x-br.x)< (br.w/2+22) && Math.abs(state.y-br.y)< (br.h/2+16)){
+      // gates auto-collect if close? for barrels cause damage
+      // treat barrels as solid
+      // small damage
+      // we make gate easy: if barrel low hp gate, auto-explode handled above via bullets only
+    }
+  }
+  updateHUD();
+  draw();
+}
+
+function shake(dur,str){
+  let origX=canvas.style.transform;
+  let t0=performance.now();
+  function s(){
+    let p=(performance.now()-t0)/ (dur*1000);
+    if(p>1){ canvas.style.transform=''; return; }
+    canvas.style.transform=`translate(${ (Math.random()-0.5)*str }px, ${(Math.random()-0.5)*str }px)`;
+    requestAnimationFrame(s);
+  }
+  s();
+}
+
+function gameOver(){
+  state.gameOver=true; state.running=false;
+  // tally
+  let elapsed = state.time.toFixed(1);
+  hud.overlay.innerHTML = `
+    <h1>GAME OVER</h1>
+    <div class="stats">
+      <div class="stat"><div class="k">Score</div><div>${state.score}</div></div>
+      <div class="stat"><div class="k">Time</div><div>${elapsed}s</div></div>
+      <div class="stat"><div class="k">Zombies</div><div>${state.zombiesKilled}</div></div>
+      <div class="stat"><div class="k">Barrels</div><div>${state.barrelsBroken}</div></div>
+      <div class="stat"><div class="k">Metal</div><div>${state.metal}</div></div>
+      <div class="stat"><div class="k">Food</div><div>${state.food}</div></div>
+    </div>
+    <p class="sub">Ammo left ${state.ammo} • Will sync to survival-api if logged in</p>
+    <button class="btn btn-primary" id="againBtn">PLAY AGAIN</button>
+    <a href="https://survival-api-w6cr.onrender.com/api/health" target="_blank" style="color:#9c4dff;font-size:12px">API health</a>
+  `;
+  hud.overlay.classList.remove('hidden');
+  document.getElementById('againBtn').addEventListener('click', ()=>{ reset(); start(); });
+  // try backend sync (fire and forget)
+  trySync();
+}
+
+function trySync(){
+  // optional: if you set token, sync to Render backend
+  // fetch('https://survival-api-w6cr.onrender.com/api/resources/1', {method:'PUT', headers:{'Authorization':'Bearer '+'demo-token', 'Content-Type':'application/json'}, body: JSON.stringify({food:state.food, metal:state.metal})})
+}
+
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  // road
+  ctx.fillStyle='#141428'; ctx.fillRect(0,0,W,H);
+  // lane lines dashed scrolling
+  ctx.strokeStyle='rgba(255,255,255,.12)'; ctx.setLineDash([18,14]); ctx.lineWidth=2;
+  let off = (state.time*400)%32;
+  for(let i=1;i<LANES;i++){
+    let x = W/2 - LANE_W/2 + (i-1)*LANE_W + LANE_W; // actually lane separators
+    // Simpler: draw 2 lines at fixed x
+  }
+  // draw 2 separators at 120 and 240
+  for(let x of [W/3, 2*W/3]){
+    ctx.beginPath(); ctx.moveTo(x, -off); ctx.lineTo(x, H+32); ctx.stroke();
+  }
+  ctx.setLineDash([]);
+  // lane guide faint
+  ctx.fillStyle='rgba(156,77,255,.06)';
+  ctx.fillRect(laneX(state.lane)-LANE_W/2+6, 0, LANE_W-12, H);
+
+  // barrels
+  for(let br of barrels){
+    ctx.save();
+    if(br.hitFlash>0) ctx.globalAlpha=0.6;
+    ctx.fillStyle = br.loot.type==='damage_x' ? '#ff3b3b' : br.loot.type==='heal' ? '#22d3ee' : '#1e293b';
+    ctx.fillRect(br.x-br.w/2, br.y-br.h/2, br.w, br.h);
+    ctx.strokeStyle='rgba(255,255,255,.2)'; ctx.strokeRect(br.x-br.w/2, br.y-br.h/2, br.w, br.h);
+    // HP bar
+    if(br.hp < br.maxHp){
+      ctx.fillStyle='#000'; ctx.fillRect(br.x-br.w/2, br.y-br.h/2-8, br.w, 4);
+      ctx.fillStyle='#22c55e'; ctx.fillRect(br.x-br.w/2, br.y-br.h/2-8, br.w*(br.hp/br.maxHp), 4);
+    }
+    // label
+    ctx.fillStyle='#fff'; ctx.font='bold 10px sans-serif'; ctx.textAlign='center';
+    ctx.fillText(br.loot.label, br.x, br.y - br.h/2 -10);
+    ctx.restore();
+  }
+
+  // enemies
+  for(let e of enemies){
+    if(e.kind==='zombie'){
+      ctx.fillStyle='#4b5f22'; ctx.fillRect(e.x-e.w/2, e.y-e.h/2, e.w, e.h);
+      ctx.fillStyle='#a3e635'; ctx.fillRect(e.x-e.w/2+4, e.y-e.h/2+4, e.w-8, 10);
+      // hp
+      ctx.fillStyle='#000'; ctx.fillRect(e.x-e.w/2, e.y-e.h/2-6, e.w, 3);
+      ctx.fillStyle='#ef4444'; ctx.fillRect(e.x-e.w/2, e.y-e.h/2-6, e.w*(e.hp/e.maxHp),3);
+      ctx.fillStyle='rgba(255,0,0,.12)'; ctx.fillRect(e.x-e.w/2, e.y-e.h/2, e.w, e.h);
+    } else {
+      ctx.fillStyle='#374151'; ctx.fillRect(e.x-e.w/2, e.y-e.h/2, e.w, e.h);
+      ctx.fillStyle='rgba(0,0,0,.3)'; ctx.fillRect(e.x-e.w/2, e.y-e.h/2, e.w, 8);
+      ctx.fillStyle='#fff'; ctx.font='10px sans-serif'; ctx.textAlign='center'; ctx.fillText('⚠', e.x, e.y+4);
+    }
+  }
+
+  // bullets
+  ctx.fillStyle='#facc15';
+  for(let b of bullets){ ctx.beginPath(); ctx.arc(b.x,b.y,5,0,Math.PI*2); ctx.fill(); ctx.fillStyle='rgba(250,204,21,.3)'; ctx.beginPath(); ctx.arc(b.x,b.y+6,7,0,Math.PI*2); ctx.fill(); ctx.fillStyle='#facc15'; }
+
+  // player
+  ctx.save();
+  ctx.translate(state.x, state.y);
+  // shadow
+  ctx.fillStyle='rgba(0,0,0,.4)'; ctx.beginPath(); ctx.ellipse(0,18,18,8,0,0,Math.PI*2); ctx.fill();
+  // body
+  ctx.fillStyle = state.buffTimer>0 ? '#ff6b6b' : '#9c4dff';
+  ctx.fillRect(-18, -24, 36, 32);
+  ctx.fillStyle='#fff'; ctx.fillRect(-14, -18, 28, 10);
+  ctx.fillStyle='#0a0a12'; ctx.beginPath(); ctx.arc(0, -10, 10,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#9c4dff'; ctx.fillRect(-4, 6, 8, 10);
+  // damage indicator
+  if(state.buffTimer>0){ ctx.fillStyle='#ff3b3b'; ctx.font='8px sans-serif'; ctx.textAlign='center'; ctx.fillText('x2',0,-28); }
+  ctx.restore();
+
+  // particles
+  for(let i=particles.length-1;i>=0;i--){
+    let p=particles[i]; p.t+=0.016;
+    ctx.fillStyle=`rgba(255,180,0,${1-p.t*2})`;
+    for(let k=0;k<p.n;k++){
+      let a = (k/p.n)*Math.PI*2 + p.t*4;
+      let d = p.t*60;
+      ctx.beginPath(); ctx.arc(p.x+Math.cos(a)*d, p.y+Math.sin(a)*d,3,0,Math.PI*2); ctx.fill();
+    }
+    if(p.t>0.5) particles.splice(i,1);
+  }
+  // floats
+  for(let i=floats.length-1;i>=0;i--){
+    let f=floats[i]; f.t+=0.016; ctx.fillStyle=f.c; ctx.font='bold 13px sans-serif'; ctx.textAlign='center';
+    ctx.globalAlpha=Math.max(0,1-f.t*1.2); ctx.fillText(f.text, f.x, f.y - f.t*60); ctx.globalAlpha=1;
+    if(f.t>0.9) floats.splice(i,1);
+  }
+}
+
+reset();
+requestAnimationFrame(loop);
+// initial overlay
+hud.overlay.classList.remove('hidden');
+document.getElementById('playBtn').addEventListener('click', start);
+updateHUD();
+</script>
+</body>
+</html>
