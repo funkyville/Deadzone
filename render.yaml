@@ -3,8 +3,10 @@ services:
     name: survival-api
     env: node
     plan: free
+    region: oregon
     buildCommand: npm install
     startCommand: npm start
+    healthCheckPath: /api/health
     envVars:
       - key: NODE_ENV
         value: production
@@ -13,12 +15,16 @@ services:
       - key: JWT_EXPIRES_IN
         value: 7d
       - key: DATABASE_URL
-        sync: false  # Set to your Render Postgres URL
+        fromDatabase:
+          name: survival_postgres
+          property: connectionString
       - key: REDIS_URL
-        sync: false  # Set to your Upstash/Render Redis URL
+        sync: false  # Set later to Upstash URL (optional - app runs without it)
+        # App will log "Redis failed" warning but still run if empty
 
 databases:
   - name: survival_postgres
     plan: free
     databaseName: survival_game
     user: survival_user
+    region: oregon
