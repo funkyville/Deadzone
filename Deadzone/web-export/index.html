@@ -686,10 +686,11 @@ function renderAuth(){
     setTimeout(()=>{
       document.getElementById('loginBtn')?.addEventListener('click', doLogin);
       document.getElementById('registerBtn')?.addEventListener('click', doRegister);
-      document.getElementById('guestBtn')?.addEventListener('click', ()=>{ showToast('Guest — local only'); });
+      document.getElementById('guestBtn')?.addEventListener('click', ()=>{ showToast('Guest — local only'); document.getElementById('menu').classList.remove('active'); document.getElementById('baseScreen').classList.add('active'); if(tutorial.done) showToast('Free play — Base → Map → Runner',''); else showTutorial(); });
     },50);
   }
   document.getElementById('logoutBtn')?.addEventListener('click',()=>{ localStorage.removeItem('dz_token'); localStorage.removeItem('dz_user'); auth.token=''; auth.user=null; updateTop(); renderAuth(); });
+  document.getElementById('playGuestBtn')?.addEventListener('click',()=>{ document.getElementById('menu').classList.remove('active'); document.getElementById('baseScreen').classList.add('active'); showToast('Guest mode',''); });
 }
 async function doLogin(){
   const email=document.getElementById('email').value.trim(), pass=document.getElementById('password').value.trim(), msg=document.getElementById('authMsg');
