@@ -28,6 +28,12 @@ body{background:#070a12;color:#e8eef7;font-family:'Segoe UI',system-ui,sans-seri
 .row .btn{flex:1}
 .muted{font-size:11px;opacity:.6}
 .msg{font-size:12px;min-height:16px}
+#tutorialOverlay{position:absolute;bottom:0;left:0;right:0;background:linear-gradient(to top, rgba(10,6,30,.96), rgba(20,12,50,.92));border-top:2px solid #9c4dff;padding:12px 14px;z-index:20;display:none;flex-direction:column;gap:8px}
+#tutorialOverlay.active{display:flex}
+#tutorialArrow{position:absolute;width:32px;height:32px;background:#9c4dff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:18px;animation:pulse 1s infinite;z-index:21;pointer-events:none}
+@keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.15)}}
+#tutorialProgress{height:6px;background:rgba(255,255,255,.12);border-radius:999px;overflow:hidden}
+#tutorialProgress div{height:100%;background:#9c4dff;transition:width .3s}
 .msg.ok{color:#22c55e}
 .msg.err{color:#ef4444}
 /* Base grid */
@@ -76,6 +82,15 @@ body{background:#070a12;color:#e8eef7;font-family:'Segoe UI',system-ui,sans-seri
       <span id="tSync" class="badge offline">● Offline</span>
     </div>
   </div>
+  <div id="tutorialOverlay">
+    <div id="tutorialProgress"><div id="tutorialProgressFill" style="width:0%"></div></div>
+    <div id="tutorialText" style="font-weight:800;font-size:13px"></div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-primary btn-small" id="tutorialNextBtn">Next</button>
+      <button class="btn btn-secondary btn-small" id="tutorialSkipBtn">Skip Tutorial</button>
+    </div>
+  </div>
+  <div id="tutorialArrow" style="display:none">👇</div>
 
   <!-- MENU -->
   <div id="menu" class="screen active">
@@ -163,10 +178,24 @@ const BD={
   barracks:{name:'Barracks', w:2,h:1, costF:30,costM:40, maxLv:5, upF:[0,60,130,260,420], upM:[0,80,160,300,500], t:[0,30,45,90,150], food:[0,0,0,0,0,0], metal:[0,0,0,0,0,0]},
 };
 const SAVE_KEY="deadzone_unified_save";
+// Tutorial — LastZ Part 1
+const TUTORIAL_STEPS=[
+  {id:"welcome", text:"Welcome to Deadzone! Your shelter is humanity's hope. Tap HQ to start.", action:"tap_hq"},
+  {id:"place_hq", text:"Place Headquarters 2×2 — tap the green ghost on the base grid.", action:"place", type:"hq"},
+  {id:"place_farm", text:"Food is survival. Place Resource Farm 1×1 next to HQ.", action:"place", type:"farm"},
+  {id:"inspect_farm", text:"Tap your Farm — Inspector shows Lv.1. Tap Upgrade!", action:"inspect"},
+  {id:"wait_upgrade", text:"Upgrading Farm to Lv.2 — 30s! Close app and reopen, it still finishes (offline).", action:"wait"},
+  {id:"go_map", text:"Horde surrounds you. Open Map to see fog — HQ reveals territory.", action:"go_map"},
+  {id:"attack_tile", text:"Tap highlighted ⚔ Lv.1 tile → Attack to clear fog.", action:"attack"},
+  {id:"win_runner", text:"Runner: Dodge, shoot barrels! Survive 10s to win (tutorial).", action:"run"},
+  {id:"clear_map", text:"Fog cleared! Tile reward claimed. Expand HQ to reveal more world.", action:"expand"},
+  {id:"done", text:"Tutorial complete! Loop: Base → Map → Runner → Base. You run Deadzone now!", action:"done"},
+];
+let tutorial={step:0, done:false};
 function laneX(i){ return (i-1)*state.laneW + 180; } // 60,180,300
 // --- persistence ---
 function save(){
-  const data={last_save: Math.floor(Date.now()/1000), resources:{food:state.food, metal:state.metal, ammo:state.ammo, hard_currency:state.hard_currency}, buildings: state.buildings, map:{hqLevel:state.hqLevel, hqRadius:state.hqRadius, tiles: state.tiles}, last_run: {score:state.rScore, food:state.rFood, metal:state.rMetal}};
+  const data={last_save: Math.floor(Date.now()/1000), resources:{food:state.food, metal:state.metal, ammo:state.ammo, hard_currency:state.hard_currency}, buildings: state.buildings, map:{hqLevel:state.hqLevel, hqRadius:state.hqRadius, tiles: state.tiles}, last_run: {score:state.rScore, food:state.rFood, metal:state.rMetal}, tutorial_step: tutorial.step, tutorial_done: tutorial.done};
   localStorage.setItem(SAVE_KEY, JSON.stringify(data));
 }
 function loadSave(){
@@ -176,6 +205,7 @@ function loadSave(){
     const r=j.resources||{}; state.food=r.food??state.food; state.metal=r.metal??state.metal; state.ammo=r.ammo??state.ammo;
     state.buildings=j.buildings||[];
     if(j.map){ state.hqLevel=j.map.hqLevel||1; state.hqRadius=j.map.hqRadius||1; state.tiles=j.map.tiles||{}; }
+    if(j.tutorial_step!==undefined){ tutorial.step=j.tutorial_step||0; tutorial.done=j.tutorial_done||false; }
     // offline completion
     const now=Math.floor(Date.now()/1000); const last=j.last_save||now; const offline=Math.max(0, now-last);
     if(offline>0){
@@ -238,8 +268,11 @@ function onCellClick(x,y){
   if(state.ghost){ // place
     if(!canPlace(state.ghost,x,y)){ showToast('Cannot place here','err'); return; }
     const d=BD[state.ghost]; spend(d.costF,d.costM);
+    const placedType=state.ghost;
     state.buildings.push({id:Date.now()+Math.random(), type:state.ghost, x,y,w:d.w,h:d.h, level:1, is_upgrading:false, finish_unix:0, target:1});
     state.ghost=null; save(); recalc(); renderBuildings(); updateTop();
+    // tutorial: place HQ then Farm
+    if(!tutorial.done && (tutorial.step===1 && placedType==='hq') || (tutorial.step===2 && placedType==='farm')) advanceTutorial();
     return;
   }
   const b=occupiedAt(x,y); if(b){ showInspector(b); }
@@ -314,7 +347,10 @@ function showInspector(b){
     if(!spend(costF,costM)) return;
     b.is_upgrading=true; b.target=b.level+1; b.finish_unix=Math.floor(Date.now()/1000)+t;
     save(); renderBuildings(); showInspector(b);
+    if(!tutorial.done && tutorial.step===4) advanceTutorial();
   });
+  // tutorial: inspect farm
+  if(!tutorial.done && tutorial.step===3 && b.type==='farm') advanceTutorial();
 }
 // menu ghost selects
 document.querySelectorAll('[data-build]').forEach(btn=> btn.addEventListener('click',()=>{ state.ghost=btn.dataset.build; showToast('Placing '+BD[state.ghost].name+' — click grid',''); }));
@@ -353,7 +389,7 @@ function selectTile(t){
   const detail=document.getElementById('mapDetail'); detail.style.display='block';
   if(t.state==='clearable'){
     detail.innerHTML=`<div style="font-weight:800">${t.x},${t.y} — Level ${t.diff}</div><div class="muted">Reward: +${t.food} Food +${t.metal} Metal</div><div class="row" style="margin-top:8px"><button class="btn btn-primary" id="attackBtn">⚔ Attack → Runner</button><button class="btn btn-secondary btn-small" id="closeMapDet">Close</button></div>`;
-    document.getElementById('attackBtn').addEventListener('click',()=>{ state.pendingRunnerTarget={x:t.x,y:t.y}; showScreen('runnerScreen'); startRunner(t.diff); });
+    document.getElementById('attackBtn').addEventListener('click',()=>{ state.pendingRunnerTarget={x:t.x,y:t.y}; showScreen('runnerScreen'); startRunner(t.diff); if(!tutorial.done && tutorial.step===6) advanceTutorial(); });
   } else if(t.state==='cleared'){
     detail.innerHTML=`<div style="font-weight:800">${t.x},${t.y} — Cleared</div><div class="muted">Loot collected</div>`;
   } else if(t.state==='hq'){
@@ -367,13 +403,14 @@ document.getElementById('expandHQBtn').addEventListener('click',()=>{
   const cF=80+state.hqLevel*60, cM=50+state.hqLevel*40;
   if(!spend(cF,cM)) return;
   state.hqLevel++; state.hqRadius=Math.min(4, 1+Math.floor(state.hqLevel/2));
-  // reveal ring
   for(let k in state.tiles){
     const t=state.tiles[k]; const dist=Math.abs(t.x-state.hqPos.x)+Math.abs(t.y-state.hqPos.y);
     if(t.state==='locked' && dist <= state.hqRadius+1) t.state='fog';
     if(t.state==='fog' && dist <= state.hqRadius) t.state='clearable';
   }
   save(); renderMap(); showToast('HQ expanded!','ok');
+  if(!tutorial.done && tutorial.step===8) advanceTutorial();
+  if(!tutorial.done && tutorial.step===9) advanceTutorial();
 });
 function onRunnerVictory(){
   const tgt=state.pendingRunnerTarget; if(!tgt) return;
@@ -553,6 +590,10 @@ function runnerGameOver(won){
   // merge to base resources on win, even on loss we keep some?
   if(won){
     state.food+=state.rFood; state.metal+=state.rMetal; save(); updateTop(); syncResources(); onRunnerVictory();
+    if(!tutorial.done && tutorial.step===7) advanceTutorial();
+  } else {
+    if(!tutorial.done && tutorial.step===7) { // tutorial runner auto-win counts even if died? Still advance after retry
+    }
   }
   document.getElementById('toMapAfter')?.addEventListener('click',()=>{ overlay.style.display='none'; showScreen('mapScreen'); });
   document.getElementById('toBaseAfter')?.addEventListener('click',()=>{ overlay.style.display='none'; showScreen('baseScreen'); });
@@ -564,11 +605,49 @@ function runnerGameOver(won){
 let winTimer=0;
 setInterval(()=>{ if(state.running && !state.gameOver){ winTimer+=1; if(winTimer>25){ winTimer=0; runnerGameOver(true); } } },1000);
 function showToast(t,cls=''){ const el=document.createElement('div'); el.textContent=t; el.style.cssText='position:fixed;top:46px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.75);padding:6px 12px;border-radius:999px;font-size:12px;z-index:99'; document.body.appendChild(el); setTimeout(()=>el.remove(),1600); }
+// Tutorial tick: check wait_upgrade completion
+setInterval(()=>{
+  if(!tutorial.done && tutorial.step===4){
+    // check if farm upgrade finished (any building target 2 finished)
+    const b=state.buildings.find(bb=> bb.target===2 && bb.level===2 && !bb.is_upgrading);
+    if(b){ advanceTutorial(); showToast('Farm Lv.2 Ready!','ok'); }
+  }
+},1000);
+document.getElementById('tutorialNextBtn')?.addEventListener('click',()=>{
+  // allow manual next for welcome/go_map steps
+  if([0,5].includes(tutorial.step)) advanceTutorial();
+});
+document.getElementById('tutorialSkipBtn')?.addEventListener('click',()=>{
+  tutorial.done=true; tutorial.step=TUTORIAL_STEPS.length; save(); showTutorial(); showToast('Tutorial skipped','');
+});
+function showTutorial(){
+  const ov=document.getElementById('tutorialOverlay');
+  const txt=document.getElementById('tutorialText');
+  const prog=document.getElementById('tutorialProgressFill');
+  const arrow=document.getElementById('tutorialArrow');
+  if(tutorial.done || tutorial.step>=TUTORIAL_STEPS.length){ ov.classList.remove('active'); ov.style.display='none'; arrow.style.display='none'; return; }
+  ov.style.display='flex'; ov.classList.add('active');
+  const s=TUTORIAL_STEPS[tutorial.step];
+  txt.textContent=`[${tutorial.step+1}/${TUTORIAL_STEPS.length}] ${s.text}`;
+  prog.style.width=`${((tutorial.step+1)/TUTORIAL_STEPS.length)*100}%`;
+  // arrow positioning hints
+  const positions={tap_hq:[110,130], place:[180,320], inspect:[180,520], wait:[180,420], go_map:[300,70], attack:[180,280], run:[180,320], expand:[180,90]};
+  const pos=positions[s.action]||[180,300];
+  arrow.style.left=pos[0]+'px'; arrow.style.top=pos[1]+'px'; arrow.style.display='flex';
+}
+function advanceTutorial(){
+  tutorial.step++;
+  if(tutorial.step>=TUTORIAL_STEPS.length){ tutorial.done=true; showToast('🎉 Tutorial complete! Free play unlocked!','ok'); }
+  save(); showTutorial();
+}
+function startTutorial(){ tutorial.step=0; tutorial.done=false; save(); showTutorial(); }
 
 // --- Screen routing ---
 function showScreen(id){
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
   document.getElementById(id).classList.add('active');
+  // tutorial triggers
+  if(id==='mapScreen' && tutorial.step===5 && !tutorial.done) advanceTutorial();
 }
 document.getElementById('goBaseBtn').addEventListener('click',()=> showScreen('baseScreen'));
 document.getElementById('goMapBtn').addEventListener('click',()=> showScreen('mapScreen'));
@@ -585,6 +664,10 @@ function startRunner(diff=1){
 }
 loadSave();
 buildGrid(); initMap(); recalc(); updateTop();
+showTutorial();
+if(tutorial.step===0 && !tutorial.done) showToast('📖 Tutorial: Follow the arrow!','');
+// auto-show tutorial if fresh (no buildings)
+if(state.buildings.length===0 && tutorial.step===0) showTutorial();
 showToast('Deadzone Unified — Base → Map → Runner','');
 // tick generation
 setInterval(()=>{ if(state.food_ps||state.metal_ps){ state.accum_food+=state.food_ps; state.accum_metal+=state.metal_ps; let af=Math.floor(state.accum_food), am=Math.floor(state.accum_metal); if(af){ state.accum_food-=af; state.food+=af; } if(am){ state.accum_metal-=am; state.metal+=am; } save(); updateTop(); renderBuildings(); } // refresh timers
