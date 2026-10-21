@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Deadzone — Unified (Base + Map + Runner)</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#070a12;color:#e8eef7;font-family:'Segoe UI',system-ui,sans-serif;overflow:hidden}
+#app{width:100vw;height:100vh;display:flex;flex-direction:column;background:linear-gradient(#0a0a12,#1a1025)}
+#topbar{height:42px;display:flex;justify-content:space-between;align-items:center;padding:0 10px;background:rgba(0,0,0,.65);border-bottom:1px solid rgba(255,255,255,.08);font-size:12px;font-weight:700;gap:6px}
+#topbar div{display:flex;gap:8px;flex-wrap:wrap}
+.badge{padding:3px 8px;border-radius:999px;font-size:10px}
+.offline{background:#33384a}
+.synced{background:#16a34a}
+.syncing{background:#f59e0b}
+.failed{background:#ef4444}
+.screen{flex:1;position:relative;display:none;overflow:hidden}
+.screen.active{display:flex}
+#menu{flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:24px;text-align:center;background:radial-gradient(ellipse at 30% 20%, #1e1b4b 0%, transparent 50%), linear-gradient(#0a0a12,#1a1025)}
+.card{background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;width:100%;max-width:360px}
+.card input{width:100%;padding:10px 12px;border-radius:10px;border:1px solid #2a2a55;background:#0f0f18;color:#fff;margin-bottom:8px}
+.btn{padding:10px 18px;border:none;border-radius:999px;font-weight:800;cursor:pointer;font-size:14px}
+.btn-primary{background:#9c4dff;color:#fff;box-shadow:0 6px 20px rgba(156,77,255,.35)}
+.btn-secondary{background:#1e1e30;color:#fff;border:1px solid #2a2a55}
+.btn-small{padding:8px 14px;font-size:12px}
+.row{display:flex;gap:8px}
+.row .btn{flex:1}
+.muted{font-size:11px;opacity:.6}
+.msg{font-size:12px;min-height:16px}
+.msg.ok{color:#22c55e}
+.msg.err{color:#ef4444}
+/* Base grid */
+#baseWrap{display:flex;flex-direction:column;align-items:center;gap:8px;padding:10px;width:100%;overflow:auto}
+.grid{--c:64px;display:grid;grid-template-columns:repeat(8,var(--c));grid-template-rows:repeat(8,var(--c));gap:2px;background:#1a1a2e;padding:6px;border-radius:10px}
+.cell{width:var(--c);height:var(--c);background:#0f0f18;border:1px solid #2a2a40;border-radius:6px;position:relative;display:flex;align-items:center;justify-content:center;font-size:10px;cursor:pointer}
+.cell.occupied{outline:2px solid rgba(156,77,255,.4)}
+.cell.ghost-ok{background:rgba(34,197,94,.18);border-color:#22c55e}
+.cell.ghost-bad{background:rgba(239,68,68,.18);border-color:#ef4444}
+.bld{position:absolute;inset:4px;border-radius:6px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-weight:800;font-size:10px;line-height:1}
+.bld.hq{background:linear-gradient(#4f46e5,#1e1b4b);color:#c7d2fe}
+.bld.farm{background:linear-gradient(#16a34a,#14532d);color:#dcfce7}
+.bld.barracks{background:linear-gradient(#f97316,#7c2d12);color:#ffedd5}
+.bld small{font-size:8px;opacity:.9}
+.timer{position:absolute;bottom:2px;left:2px;right:2px;height:4px;background:rgba(0,0,0,.35);border-radius:999px;overflow:hidden}
+.timer div{height:100%;background:#22c55e}
+/* Map grid */
+#mapWrap{display:flex;flex-direction:column;align-items:center;gap:8px;padding:10px;width:100%;overflow:auto}
+.mapgrid{--m:40px;display:grid;grid-template-columns:repeat(9,var(--m));grid-template-rows:repeat(9,var(--m));gap:2px;background:#111827;padding:6px;border-radius:10px}
+.mcell{width:var(--m);height:var(--m);border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;cursor:pointer;border:1px solid rgba(255,255,255,.06);position:relative}
+.mcell.locked{background:#0a0a12;color:#3a3a4a}
+.mcell.fog{background:#1f2937;color:#9ca3af}
+.mcell.clearable{background:#14321a;border-color:#22c55e;color:#bbf7d0;box-shadow:inset 0 0 0 1px #22c55e}
+.mcell.cleared{background:#0f1a12;color:#6a7a6b}
+.mcell.hq{background:#1e1b4b;color:#c7d2fe;border-color:#a78bfa;box-shadow:0 0 0 2px #a78bfa}
+/* Runner */
+#runnerWrap{flex:1;position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;background:linear-gradient(#0a0a12,#1a1025)}
+#runnerCanvas{border:2px solid #2a2a40;border-radius:12px;box-shadow:0 12px 40px rgba(0,0,0,.6);background:#0f0f18}
+.runnerHUD{position:absolute;top:6px;left:0;right:0;display:flex;justify-content:space-between;padding:0 12px;font-size:12px;font-weight:700}
+.runnerControls{position:absolute;bottom:8px;left:0;right:0;display:flex;justify-content:space-between;padding:0 12px;gap:8px}
+.ctl{flex:1;padding:12px 0;border-radius:10px;border:1px solid #2a2a55;background:rgba(30,30,50,.6);color:#fff;font-weight:800}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="topbar">
+    <div>
+      <span id="tScore">Score 0</span>
+      <span id="tFood">Food 200</span>
+      <span id="tMetal">Metal 150</span>
+      <span id="tAmmo">Ammo 100</span>
+    </div>
+    <div>
+      <span id="tHP">HP 100</span>
+      <span id="tUser">● Guest</span>
+      <span id="tSync" class="badge offline">● Offline</span>
+    </div>
+  </div>
+
+  <!-- MENU -->
+  <div id="menu" class="screen active">
+    <h1 style="font-size:28px">🧟 DEADZONE</h1>
+    <div class="muted">One Project: Base → Map → Runner → Base</div>
+    <div class="card" id="authCard"></div>
+    <div class="row" style="max-width:360px;width:100%">
+      <button class="btn btn-primary" id="goBaseBtn">🏗 Base</button>
+      <button class="btn btn-secondary" id="goMapBtn">🗺 Map</button>
+      <button class="btn btn-secondary" id="goRunnerBtn">🏃 Runner</button>
+    </div>
+    <div class="muted">Runner clears fog → Map expands → Base produces resources (even offline)</div>
+  </div>
+
+  <!-- BASE -->
+  <div id="baseScreen" class="screen" style="flex-direction:column">
+    <div style="display:flex;gap:8px;padding:8px;flex-wrap:wrap;justify-content:center">
+      <button class="btn btn-secondary btn-small" data-build="hq">HQ 2×2 (Free)</button>
+      <button class="btn btn-secondary btn-small" data-build="farm">Farm 1×1 (20F/10M)</button>
+      <button class="btn btn-secondary btn-small" data-build="barracks">Barracks 2×1 (30F/40M)</button>
+      <button class="btn btn-secondary btn-small" id="cancelPlaceBtn">Cancel</button>
+      <button class="btn btn-primary btn-small" id="toMapBtn2">→ Map</button>
+    </div>
+    <div id="baseWrap">
+      <div id="grid" class="grid"></div>
+      <div id="prod" class="muted"></div>
+      <div id="inspector" class="card" style="display:none;max-width:360px;width:100%"></div>
+    </div>
+  </div>
+
+  <!-- MAP -->
+  <div id="mapScreen" class="screen" style="flex-direction:column;align-items:center">
+    <div style="display:flex;gap:8px;padding:8px;flex-wrap:wrap;justify-content:center;width:100%">
+      <span id="hqInfo" class="badge synced">HQ Lv.1 Radius 1</span>
+      <button class="btn btn-primary btn-small" id="expandHQBtn">Expand HQ (80F/50M)</button>
+      <button class="btn btn-secondary btn-small" id="backBaseBtn">← Base</button>
+      <button class="btn btn-secondary btn-small" id="toRunnerBtn">→ Runner</button>
+    </div>
+    <div id="mapWrap">
+      <div id="mapGrid" class="mapgrid"></div>
+      <div id="mapDetail" class="card" style="max-width:360px;display:none"></div>
+    </div>
+  </div>
+
+  <!-- RUNNER -->
+  <div id="runnerScreen" class="screen">
+    <div id="runnerWrap">
+      <div class="runnerHUD"><span id="rScore">Score 0</span><span id="rMetal">Metal 0</span><span id="rFood">Food 0</span><span id="rAmmo">Ammo 100</span></div>
+      <div id="rBuff" style="position:absolute;top:28px;left:50%;transform:translateX(-50%);background:#ff3b3b;color:#fff;padding:4px 10px;border-radius:999px;font-weight:800;display:none;font-size:12px"></div>
+      <canvas id="runnerCanvas" width="360" height="640"></canvas>
+      <div class="runnerControls">
+        <button class="ctl" id="leftBtn">◀</button>
+        <button class="ctl" id="shootBtn">▲ SHOOT</button>
+        <button class="ctl" id="rightBtn">▶</button>
+      </div>
+      <div id="runnerOverlay" style="position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(5,5,15,.88);flex-direction:column;gap:12px;padding:20px;text-align:center"></div>
+    </div>
+  </div>
+</div>
+<script>
+const API="https://survival-api-w6cr.onrender.com";
+let auth={token:localStorage.getItem('dz_token')||'', user: JSON.parse(localStorage.getItem('dz_user')||'null'), userId:null};
+if(auth.token){ try{ const p=JSON.parse(atob(auth.token.split('.')[1])); auth.userId=p.id; }catch{} }
+let state={
+  // shared resources
+  food:200, metal:150, ammo:100, hard_currency:10, health:100, score:0,
+  food_ps:0, metal_ps:0, accum_food:0, accum_metal:0,
+  // base
+  gridSize:{w:8,h:8}, cell:64,
+  buildings:[], // {id, type, x,y,w,h, level, is_upgrading, finish_unix, target}
+  ghost:null, ghostValid:false,
+  selectedId:null,
+  // map 9x9
+  mapSize:{w:9,h:9}, hqPos:{x:4,y:4}, hqLevel:1, hqRadius:1,
+  tiles:{}, selectedTile:null, pendingRunnerTarget:null,
+  // runner
+  lane:1, x:180, targetX:180, laneW:120, isSwitching:false,
+  rScore:0, rMetal:0, rFood:0, rHP:100, damage:25, buffMult:1, buffTimer:0,
+  bullets:[], enemies:[], barrels:[], particles:[], floats:[],
+  rTime:0, spawnTimer:0, difficulty:0, running:false, gameOver:false
+};
+const BD={
+  hq:{name:'Headquarters', w:2,h:2, costF:0,costM:0, maxLv:5, upF:[0,80,150,300,500], upM:[0,50,100,220,400], t:[0,30,60,120,180], food:[0,0,0,0,0,0], metal:[0,0,0,0,0,0], storage:[0,100,250,500,900]},
+  farm:{name:'Resource Farm', w:1,h:1, costF:20,costM:10, maxLv:5, upF:[0,40,90,180,350], upM:[0,30,70,150,280], t:[0,30,60,90,150], food:[0,0.5,1.0,1.8,3.0], metal:[0,0.1,0.25,0.5,0.9]},
+  barracks:{name:'Barracks', w:2,h:1, costF:30,costM:40, maxLv:5, upF:[0,60,130,260,420], upM:[0,80,160,300,500], t:[0,30,45,90,150], food:[0,0,0,0,0,0], metal:[0,0,0,0,0,0]},
+};
+const SAVE_KEY="deadzone_unified_save";
+function laneX(i){ return (i-1)*state.laneW + 180; } // 60,180,300
+// --- persistence ---
+function save(){
+  const data={last_save: Math.floor(Date.now()/1000), resources:{food:state.food, metal:state.metal, ammo:state.ammo, hard_currency:state.hard_currency}, buildings: state.buildings, map:{hqLevel:state.hqLevel, hqRadius:state.hqRadius, tiles: state.tiles}, last_run: {score:state.rScore, food:state.rFood, metal:state.rMetal}};
+  localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+}
+function loadSave(){
+  const raw=localStorage.getItem(SAVE_KEY); if(!raw) return;
+  try{
+    const j=JSON.parse(raw);
+    const r=j.resources||{}; state.food=r.food??state.food; state.metal=r.metal??state.metal; state.ammo=r.ammo??state.ammo;
+    state.buildings=j.buildings||[];
+    if(j.map){ state.hqLevel=j.map.hqLevel||1; state.hqRadius=j.map.hqRadius||1; state.tiles=j.map.tiles||{}; }
+    // offline completion
+    const now=Math.floor(Date.now()/1000); const last=j.last_save||now; const offline=Math.max(0, now-last);
+    if(offline>0){
+      let completed=0;
+      for(let b of state.buildings){ if(b.is_upgrading && now >= b.finish_unix){ b.level=b.target; b.is_upgrading=false; b.finish_unix=0; completed++; } }
+      if(completed) console.log('Offline completed',completed,'upgrades');
+      // generation
+      recalc(); const addF=Math.floor(state.food_ps*offline), addM=Math.floor(state.metal_ps*offline);
+      if(addF||addM){ state.food+=addF; state.metal+=addM; console.log('Offline +%d food +%d metal',addF,addM); }
+    }
+  }catch(e){ console.warn('load fail',e); }
+}
+function canAfford(f,m){ return state.food>=f && state.metal>=m; }
+function spend(f,m){ if(!canAfford(f,m)) return false; state.food-=f; state.metal-=m; save(); updateTop(); return true; }
+// --- auth (same as before) ---
+function decode(t){ try{ return JSON.parse(atob(t.split('.')[1])); }catch{ return null; } }
+function isValid(t){ const p=decode(t); return p && p.exp*1000 > Date.now(); }
+function setAuth(token,user){
+  auth.token=token; auth.user=user; if(token){ try{ auth.userId=decode(token).id; }catch{} } else auth.userId=null;
+  if(token){ localStorage.setItem('dz_token',token); localStorage.setItem('dz_user',JSON.stringify(user||{})); } else { localStorage.removeItem('dz_token'); localStorage.removeItem('dz_user'); }
+  updateTop();
+}
+function updateTop(){
+  document.getElementById('tFood').textContent=`Food ${state.food}`;
+  document.getElementById('tMetal').textContent=`Metal ${state.metal}`;
+  document.getElementById('tAmmo').textContent=`Ammo ${state.ammo}`;
+  document.getElementById('tHP').textContent=`HP ${state.health||100}`;
+  document.getElementById('tScore').textContent=`Score ${state.rScore||0}`;
+  const badge=document.getElementById('tSync');
+  if(!auth.token){ badge.textContent='● Offline'; badge.className='badge offline'; document.getElementById('tUser').textContent='● Guest'; }
+  else if(!isValid(auth.token)){ badge.textContent='● Expired'; badge.className='badge offline'; }
+  else { badge.textContent='● Synced'; badge.className='badge synced'; document.getElementById('tUser').textContent=`👤 ${auth.user?.username||'Player'}`; }
+}
+async function syncResources(){
+  if(!auth.token || !auth.userId) return;
+  const badge=document.getElementById('tSync'); badge.textContent='● Syncing…'; badge.className='badge syncing';
+  try{
+    const res=await fetch(`${API}/api/resources/${auth.userId}`, {method:'PUT', headers:{'Content-Type':'application/json','Authorization':'Bearer '+auth.token}, body: JSON.stringify({food:state.food, metal:state.metal, ammo:state.ammo})});
+    if(res.ok){ badge.textContent='● Synced'; badge.className='badge synced'; } else throw new Error(''+res.status);
+  }catch(e){ badge.textContent='● Sync failed'; badge.className='badge failed'; }
+}
+// --- Base grid ---
+const gridEl=document.getElementById('grid');
+function buildGrid(){
+  gridEl.innerHTML='';
+  for(let y=0;y<state.gridSize.h;y++) for(let x=0;x<state.gridSize.w;x++){
+    const cell=document.createElement('div'); cell.className='cell'; cell.dataset.x=x; cell.dataset.y=y;
+    cell.addEventListener('click',()=> onCellClick(x,y));
+    gridEl.appendChild(cell);
+  }
+  renderBuildings();
+}
+function occupiedAt(x,y){ return state.buildings.find(b=> x>=b.x && x < b.x+b.w && y>=b.y && y < b.y+b.h); }
+function canPlace(type, x,y){
+  const d=BD[type]; if(x<0||y<0|| x+d.w>state.gridSize.w || y+d.h>state.gridSize.h) return false;
+  for(let dy=0;dy<d.h;dy++) for(let dx=0;dx<d.w;dx++) if(occupiedAt(x+dx,y+dy)) return false;
+  return canAfford(d.costF,d.costM);
+}
+function onCellClick(x,y){
+  if(state.ghost){ // place
+    if(!canPlace(state.ghost,x,y)){ showToast('Cannot place here','err'); return; }
+    const d=BD[state.ghost]; spend(d.costF,d.costM);
+    state.buildings.push({id:Date.now()+Math.random(), type:state.ghost, x,y,w:d.w,h:d.h, level:1, is_upgrading:false, finish_unix:0, target:1});
+    state.ghost=null; save(); recalc(); renderBuildings(); updateTop();
+    return;
+  }
+  const b=occupiedAt(x,y); if(b){ showInspector(b); }
+}
+function renderBuildings(){
+  // clear bld overlays, redraw cells
+  document.querySelectorAll('.cell').forEach(c=>{ c.innerHTML=''; c.classList.remove('occupied','ghost-ok','ghost-bad'); });
+  // occupied highlight
+  for(let b of state.buildings){
+    for(let dy=0;dy<b.h;dy++) for(let dx=0;dx<b.w;dx++){
+      const idx=b.y*state.gridSize.w + b.x + dx + dy*state.gridSize.w;
+      const cell=gridEl.children[idx]; if(cell) cell.classList.add('occupied');
+    }
+    // bld element spanning
+    const firstIdx=b.y*state.gridSize.w + b.x;
+    const cell=gridEl.children[firstIdx];
+    if(!cell) continue;
+    const el=document.createElement('div'); el.className='bld '+b.type;
+    const d=BD[b.type];
+    el.style.width=`calc(${d.w}*64px + ${(d.w-1)*2}px)`; el.style.height=`calc(${d.h}*64px + ${(d.h-1)*2}px)`;
+    el.style.left='0'; el.style.top='0'; el.style.position='absolute'; el.style.zIndex='2';
+    // timer bar
+    let timerTxt='';
+    if(b.is_upgrading){
+      const now=Math.floor(Date.now()/1000); const rem=Math.max(0,b.finish_unix - now);
+      if(rem<=0){ b.level=b.target; b.is_upgrading=false; save(); recalc(); timerTxt='Ready!'; } else timerTxt = `${String(Math.floor(rem/60)).padStart(2,'0')}:${String(rem%60).padStart(2,'0')}`;
+      const total = d.t[b.target]||30; const elapsed=Math.max(0,total - rem);
+      el.innerHTML=`${d.name}<small>Lv.${b.level}→${b.target}</small><div style="font-size:9px">${timerTxt}</div><div class="timer"><div style="width:${(elapsed/total)*100}%"></div></div>`;
+    } else {
+      el.innerHTML=`${d.name}<small>Lv.${b.level}</small>`;
+    }
+    cell.style.position='relative'; cell.appendChild(el);
+  }
+  // ghost preview on hover
+  gridEl.onmousemove=(e)=>{
+    if(!state.ghost) return;
+    const rect=gridEl.getBoundingClientRect(); const cx=Math.floor((e.clientX-rect.left)/66); const cy=Math.floor((e.clientY-rect.top)/66);
+    document.querySelectorAll('.cell').forEach(c=>c.classList.remove('ghost-ok','ghost-bad'));
+    const d=BD[state.ghost]; const ok=canPlace(state.ghost,cx,cy);
+    for(let dy=0;dy<d.h;dy++) for(let dx=0;dx<d.w;dx++){
+      const idx=(cy+dy)*state.gridSize.w + (cx+dx); const cell=gridEl.children[idx]; if(cell) cell.classList.add(ok?'ghost-ok':'ghost-bad');
+    }
+  };
+  document.getElementById('prod').textContent=`+${state.food_ps.toFixed(1)} food/s  +${state.metal_ps.toFixed(1)} metal/s`;
+}
+function recalc(){
+  state.food_ps=0; state.metal_ps=0;
+  for(let b of state.buildings){
+    const d=BD[b.type]; state.food_ps+= d.food[b.level]||0; state.metal_ps+= d.metal[b.level]||0;
+  }
+  document.getElementById('prod').textContent=`+${state.food_ps.toFixed(1)} food/s  +${state.metal_ps.toFixed(1)} metal/s`;
+}
+function showInspector(b){
+  const insp=document.getElementById('inspector'); insp.style.display='block';
+  const d=BD[b.type];
+  let html=`<div style="font-weight:800">${d.name} — Lv.${b.level}/${d.maxLv||5}</div>`;
+  if(b.is_upgrading){
+    const now=Math.floor(Date.now()/1000); const rem=Math.max(0,b.finish_unix-now);
+    html+=`<div class="muted">Upgrading to Lv.${b.target} — ${String(Math.floor(rem/60)).padStart(2,'0')}:${String(rem%60).padStart(2,'0')} (persists offline)</div><button class="btn btn-secondary btn-small" disabled>Upgrading…</button>`;
+  } else if(b.level >= (d.maxLv||5)){
+    html+=`<div class="muted">MAX LEVEL</div>`;
+  } else {
+    const costF=d.upF[b.level+1]||0, costM=d.upM[b.level+1]||0, t=d.t[b.level+1]||30;
+    const can=canAfford(costF,costM);
+    html+=`<div class="muted">Cost: ${costF} Food, ${costM} Metal — ${t}s</div><button class="btn ${can?'btn-primary':'btn-secondary'}" id="upBtn" ${can?'':'disabled'}>Upgrade → Lv.${b.level+1}</button>`;
+  }
+  html+=`<div style="margin-top:6px"><button class="btn btn-secondary btn-small" id="closeInsp">Close</button></div>`;
+  insp.innerHTML=html;
+  document.getElementById('closeInsp')?.addEventListener('click',()=> insp.style.display='none');
+  document.getElementById('upBtn')?.addEventListener('click',()=>{
+    const costF=d.upF[b.level+1], costM=d.upM[b.level+1], t=d.t[b.level+1];
+    if(!spend(costF,costM)) return;
+    b.is_upgrading=true; b.target=b.level+1; b.finish_unix=Math.floor(Date.now()/1000)+t;
+    save(); renderBuildings(); showInspector(b);
+  });
+}
+// menu ghost selects
+document.querySelectorAll('[data-build]').forEach(btn=> btn.addEventListener('click',()=>{ state.ghost=btn.dataset.build; showToast('Placing '+BD[state.ghost].name+' — click grid',''); }));
+document.getElementById('cancelPlaceBtn').addEventListener('click',()=>{ state.ghost=null; showToast('Cancelled',''); renderBuildings(); });
+
+// --- Map 9x9 ---
+const mapEl=document.getElementById('mapGrid');
+function initMap(){
+  if(Object.keys(state.tiles).length===0){
+    // generate 9x9 fog
+    for(let y=0;y<9;y++) for(let x=0;x<9;x++){
+      const coord=`${x},${y}`; const dist=Math.abs(x-state.hqPos.x)+Math.abs(y-state.hqPos.y);
+      let st='locked';
+      if(x===state.hqPos.x && y===state.hqPos.y) st='hq';
+      else if(dist <= state.hqRadius) st= Math.random()<0.7?'clearable':'fog';
+      else if(dist===state.hqRadius+1) st='fog';
+      state.tiles[coord]={x,y,dist, state:st, diff: Math.min(5, Math.max(1,dist)), food:15+dist*8+Math.floor(Math.random()*10), metal:10+dist*6+Math.floor(Math.random()*8)};
+    }
+  }
+  renderMap();
+}
+function renderMap(){
+  mapEl.innerHTML='';
+  document.getElementById('hqInfo').textContent=`HQ Lv.${state.hqLevel} Radius ${state.hqRadius}`;
+  const cF=80+state.hqLevel*60, cM=50+state.hqLevel*40;
+  const btn=document.getElementById('expandHQBtn'); btn.textContent=`Expand HQ (${cF}F/${cM}M)`; btn.disabled=!canAfford(cF,cM);
+  for(let y=0;y<9;y++) for(let x=0;x<9;x++){
+    const t=state.tiles[`${x},${y}`]; const d=document.createElement('div'); d.className='mcell '+t.state; d.textContent = t.state==='hq'?'🏠': t.state==='clearable'?`⚔${t.diff}`: t.state==='cleared'?'✓': t.state==='fog'?'🌫':'';
+    d.title=`${x},${y} Lv${t.diff} +${t.food}F +${t.metal}M`;
+    d.addEventListener('click',()=> selectTile(t));
+    mapEl.appendChild(d);
+  }
+}
+function selectTile(t){
+  state.selectedTile=t;
+  const detail=document.getElementById('mapDetail'); detail.style.display='block';
+  if(t.state==='clearable'){
+    detail.innerHTML=`<div style="font-weight:800">${t.x},${t.y} — Level ${t.diff}</div><div class="muted">Reward: +${t.food} Food +${t.metal} Metal</div><div class="row" style="margin-top:8px"><button class="btn btn-primary" id="attackBtn">⚔ Attack → Runner</button><button class="btn btn-secondary btn-small" id="closeMapDet">Close</button></div>`;
+    document.getElementById('attackBtn').addEventListener('click',()=>{ state.pendingRunnerTarget={x:t.x,y:t.y}; showScreen('runnerScreen'); startRunner(t.diff); });
+  } else if(t.state==='cleared'){
+    detail.innerHTML=`<div style="font-weight:800">${t.x},${t.y} — Cleared</div><div class="muted">Loot collected</div>`;
+  } else if(t.state==='hq'){
+    detail.innerHTML=`<div style="font-weight:800">🏠 HQ</div><div class="muted">Center of expansion. Upgrade to reveal more fog.</div>`;
+  } else {
+    detail.innerHTML=`<div>${t.x},${t.y} — ${t.state}</div><div class="muted">Expand HQ to unlock</div>`;
+  }
+  document.getElementById('closeMapDet')?.addEventListener('click',()=> detail.style.display='none');
+}
+document.getElementById('expandHQBtn').addEventListener('click',()=>{
+  const cF=80+state.hqLevel*60, cM=50+state.hqLevel*40;
+  if(!spend(cF,cM)) return;
+  state.hqLevel++; state.hqRadius=Math.min(4, 1+Math.floor(state.hqLevel/2));
+  // reveal ring
+  for(let k in state.tiles){
+    const t=state.tiles[k]; const dist=Math.abs(t.x-state.hqPos.x)+Math.abs(t.y-state.hqPos.y);
+    if(t.state==='locked' && dist <= state.hqRadius+1) t.state='fog';
+    if(t.state==='fog' && dist <= state.hqRadius) t.state='clearable';
+  }
+  save(); renderMap(); showToast('HQ expanded!','ok');
+});
+function onRunnerVictory(){
+  const tgt=state.pendingRunnerTarget; if(!tgt) return;
+  const key=`${tgt.x},${tgt.y}`; const t=state.tiles[key]; if(!t) return;
+  if(t.state==='clearable' || t.state==='fog'){
+    t.state='cleared'; state.food+=t.food; state.metal+=t.metal; save(); updateTop();
+    // unlock neighbors
+    for(let d of [[1,0],[-1,0],[0,1],[0,-1]]){
+      const nk=`${tgt.x+d[0]},${tgt.y+d[1]}`; const nt=state.tiles[nk];
+      if(nt && nt.state==='fog') nt.state='clearable';
+      if(nt && nt.state==='locked' && Math.abs(nt.x-state.hqPos.x)+Math.abs(nt.y-state.hqPos.y) <= state.hqRadius+1) nt.state='fog';
+    }
+    showToast(`Cleared ${key} +${t.food}F +${t.metal}M`,'ok');
+  }
+  state.pendingRunnerTarget=null;
+}
+
+// --- Runner (reuse previous runner logic, compact) ---
+const canvas=document.getElementById('runnerCanvas'), ctx=canvas.getContext('2d');
+const W=360,H=640;
+let rState={x:180,y:550, isSwitching:false, hp:100, buffMult:1, buffTimer:0, score:0};
+let bullets=[], enemies=[], barrels=[], particles=[], floats=[];
+function laneX(i){ return (i-1)*120+180; }
+function startRunner(diff=1){
+  rState.hurtTimer=0; rState.score=0; rState.hp=100; rState.buffMult= (diff>3?1:1); rState.buffTimer=0;
+  state.rScore=0; state.rFood=0; state.rMetal=0;
+  bullets=[]; enemies=[]; barrels=[]; particles=[]; floats=[];
+  state.running=true; state.gameOver=false; state.rTime=0; state.spawnTimer=0.8; state.difficulty=diff*0.2;
+  document.getElementById('runnerOverlay').style.display='none';
+  rState.lane=1; rState.x=laneX(1); rState.targetX=laneX(1);
+  showScreen('runnerScreen');
+  syncSession();
+}
+let spawnTimer=0.8;
+function spawn(diff){
+  let r=Math.random(), lane=Math.floor(Math.random()*3), x=laneX(lane), y=-40;
+  if(r<0.3) enemies.push({kind:'obstacle',x,y,vy:300+diff*40,w:64,h:36,dmg:25});
+  else if(r<0.65) enemies.push({kind:'zombie',x,y,vy:220+diff*30,w:44,h:56,hp:50+diff*10,maxHp:50+diff*10,sway:Math.random()*Math.PI*2,dmg:18});
+  else {
+    const pool=[{type:'ammo',val:50,label:'+50 Ammo',hp:30},{type:'metal',val:20,label:'+20 Metal',hp:25},{type:'food',val:15,label:'+15 Food',hp:25},{type:'damage_x',val:2,label:'x2 DAMAGE',hp:40,dur:5}];
+    const loot=pool[Math.floor(Math.random()*pool.length)]; barrels.push({x,y,vy:200,w:70,h:42,hp:loot.hp,maxHp:loot.hp,loot,flash:0});
+  }
+}
+function tryLane(dir){
+  if(rState.isSwitching) return;
+  let nl=Math.max(0,Math.min(2,(rState.lane??1)+dir)); // rState.lane not exist - fix
+}
+let laneIdx=1, laneIsSwitching=false, laneXcur=180, laneTarget=180;
+function tryLaneIdx(dir){
+  if(laneIsSwitching) return;
+  let nl=Math.max(0,Math.min(2,laneIdx+dir)); if(nl===laneIdx) return;
+  laneIdx=nl; laneTarget=laneX(nl); laneIsSwitching=true;
+  let s=laneXcur, t0=performance.now(), dur=0.18;
+  (function anim(){
+    let p=Math.min(1,(performance.now()-t0)/(dur*1000)); let e=1-Math.pow(1-p,3);
+    laneXcur=s+(laneTarget-s)*e;
+    if(p<1) requestAnimationFrame(anim); else { laneXcur=laneTarget; laneIsSwitching=false; }
+  })();
+}
+function shoot(){
+  if(!state.running||state.gameOver||state.ammo<=0) return;
+  state.ammo--; updateTop();
+  bullets.push({x:laneXcur,y:520,vy:-900,dmg:25*(rState.buffMult||1)});
+}
+document.getElementById('leftBtn').addEventListener('click',()=>tryLaneIdx(-1));
+document.getElementById('rightBtn').addEventListener('click',()=>tryLaneIdx(1));
+document.getElementById('shootBtn').addEventListener('click',shoot);
+window.addEventListener('keydown',e=>{ if(e.key==='ArrowLeft') tryLaneIdx(-1); if(e.key==='ArrowRight') tryLaneIdx(1); if(e.key===' ') shoot(); });
+let touchSX=0;
+canvas.addEventListener('touchstart',e=>{ touchSX=e.touches[0].clientX; },{passive:false});
+canvas.addEventListener('touchend',e=>{
+  let dx=e.changedTouches[0].clientX-touchSX;
+  if(Math.abs(dx)>40) tryLaneIdx(dx>0?1:-1); else shoot();
+},{passive:false});
+
+let last=performance.now(), sessionTick=0;
+function loop(now){
+  requestAnimationFrame(loop);
+  let dt=Math.min(0.033,(now-last)/1000); last=now;
+  if(!state.running || state.gameOver){ drawRunner(); return; }
+  state.rTime+=dt; state.difficulty+=dt*0.02;
+  if(rState.buffTimer>0){ rState.buffTimer-=dt; if(rState.buffTimer<=0) rState.buffMult=1; }
+  spawnTimer-=dt; if(spawnTimer<=0){ spawn(state.difficulty); spawnTimer=Math.max(0.3,0.9-Math.min(0.6,state.difficulty*0.02)+Math.random()*0.6); }
+  for(let i=bullets.length-1;i>=0;i--){ bullets[i].y+=bullets[i].vy*dt; if(bullets[i].y<-20) bullets.splice(i,1); }
+  for(let e of enemies){ e.y+=e.vy*dt; if(e.kind==='zombie') e.x+=Math.sin(state.rTime*2+e.sway)*0.4; }
+  for(let b of barrels){ b.y+=b.vy*dt; if(b.flash>0) b.flash-=dt; }
+  enemies=enemies.filter(e=>e.y<H+100); barrels=barrels.filter(b=>b.y<H+100);
+  // bullets vs enemies/barrels
+  for(let i=bullets.length-1;i>=0;i--){
+    let b=bullets[i];
+    for(let j=enemies.length-1;j>=0;j--){
+      let e=enemies[j]; if(Math.abs(b.x-e.x)<e.w/2+10 && Math.abs(b.y-e.y)<e.h/2+10){
+        if(e.kind==='zombie'){ e.hp-=b.dmg; if(e.hp<=0){ enemies.splice(j,1); state.rScore+=10; state.rMetal+=5; floats.push({x:e.x,y:e.y,text:'+10',c:'#ffcc00',t:0}); } }
+        bullets.splice(i,1); break;
+      }
+    }
+    if(i>=bullets.length) continue;
+    for(let j=barrels.length-1;j>=0;j--){
+      let br=barrels[j]; if(Math.abs(b.x-br.x)<br.w/2+10 && Math.abs(b.y-br.y)<br.h/2+10){
+        br.hp-=b.dmg; br.flash=0.15;
+        if(br.hp<=0){
+          const loot=br.loot;
+          if(loot.type==='ammo') state.ammo+=loot.val;
+          else if(loot.type==='metal') state.rMetal+=loot.val;
+          else if(loot.type==='food') state.rFood+=loot.val;
+          else if(loot.type==='damage_x'){ rState.buffMult=loot.val; rState.buffTimer=loot.dur||5; }
+          state.rScore+=5; floats.push({x:br.x,y:br.y,text:loot.label,c:loot.type==='damage_x'?'#ff3b3b':'#ffcc00',t:0}); particles.push({x:br.x,y:br.y,t:0,n:14}); barrels.splice(j,1);
+        }
+        bullets.splice(i,1); updateTop(); break;
+      }
+    }
+  }
+  // player hit
+  for(let j=enemies.length-1;j>=0;j--){
+    let e=enemies[j]; if(Math.abs(laneXcur-e.x)<e.w/2+20 && Math.abs(550-e.y)<e.h/2+18){
+      rState.hp-=e.dmg; enemies.splice(j,1); shake(0.3,8); if(rState.hp<=0) runnerGameOver(false);
+    }
+  }
+  // periodic session sync
+  sessionTick+=dt; if(sessionTick>3){ sessionTick=0; syncSession(); }
+  drawRunner();
+}
+function drawRunner(){
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle='#141428'; ctx.fillRect(0,0,W,H);
+  ctx.strokeStyle='rgba(255,255,255,.12)'; ctx.setLineDash([18,14]); ctx.lineWidth=2;
+  let off=(state.rTime*400)%32;
+  for(let x of [W/3,2*W/3]){ ctx.beginPath(); ctx.moveTo(x,-off); ctx.lineTo(x,H+32); ctx.stroke(); }
+  ctx.setLineDash([]); ctx.fillStyle='rgba(156,77,255,.06)'; ctx.fillRect(laneX(laneIdx)-60,0,120,H);
+  for(let br of barrels){
+    ctx.save(); if(br.flash>0) ctx.globalAlpha=0.6;
+    ctx.fillStyle= br.loot.type==='damage_x'?'#ff3b3b': br.loot.type==='food'?'#14532d':'#1e293b';
+    ctx.fillRect(br.x-br.w/2,br.y-br.h/2,br.w,br.h);
+    if(br.hp<br.maxHp){ ctx.fillStyle='#000'; ctx.fillRect(br.x-br.w/2,br.y-br.h/2-8,br.w,4); ctx.fillStyle='#22c55e'; ctx.fillRect(br.x-br.w/2,br.y-br.h/2-8,br.w*(br.hp/br.maxHp),4); }
+    ctx.fillStyle='#fff'; ctx.font='bold 10px sans-serif'; ctx.textAlign='center'; ctx.fillText(br.loot.label,br.x,br.y-br.h/2-10);
+    ctx.restore();
+  }
+  for(let e of enemies){
+    if(e.kind==='zombie'){
+      ctx.fillStyle='#4b5f22'; ctx.fillRect(e.x-e.w/2,e.y-e.h/2,e.w,e.h);
+      ctx.fillStyle='#000'; ctx.fillRect(e.x-e.w/2,e.y-e.h/2-6,e.w,3); ctx.fillStyle='#ef4444'; ctx.fillRect(e.x-e.w/2,e.y-e.h/2-6,e.w*(e.hp/e.maxHp),3);
+    } else { ctx.fillStyle='#374151'; ctx.fillRect(e.x-e.w/2,e.y-e.h/2,e.w,e.h); ctx.fillStyle='#fff'; ctx.font='10px sans-serif'; ctx.textAlign='center'; ctx.fillText('⚠',e.x,e.y+4); }
+  }
+  ctx.fillStyle='#facc15'; for(let b of bullets){ ctx.beginPath(); ctx.arc(b.x,b.y,5,0,Math.PI*2); ctx.fill(); }
+  // player
+  ctx.save(); ctx.translate(laneXcur,550);
+  ctx.fillStyle='rgba(0,0,0,.4)'; ctx.beginPath(); ctx.ellipse(0,18,18,8,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle=rState.buffTimer>0?'#ff6b6b':'#9c4dff'; ctx.fillRect(-18,-24,36,32);
+  ctx.fillStyle='#fff'; ctx.fillRect(-14,-18,28,10);
+  ctx.fillStyle='#0a0a12'; ctx.beginPath(); ctx.arc(0,-10,10,0,Math.PI*2); ctx.fill();
+  ctx.restore();
+  for(let i=particles.length-1;i>=0;i--){ let p=particles[i]; p.t+=0.016; ctx.fillStyle=`rgba(255,180,0,${1-p.t*2})`; for(let k=0;k<p.n;k++){ let a=(k/p.n)*Math.PI*2+p.t*4; let d=p.t*60; ctx.beginPath(); ctx.arc(p.x+Math.cos(a)*d,p.y+Math.sin(a)*d,3,0,Math.PI*2); ctx.fill(); } if(p.t>0.5) particles.splice(i,1); }
+  for(let i=floats.length-1;i>=0;i--){ let f=floats[i]; f.t+=0.016; ctx.fillStyle=f.c; ctx.font='bold 13px sans-serif'; ctx.textAlign='center'; ctx.globalAlpha=Math.max(0,1-f.t*1.2); ctx.fillText(f.text,f.x,f.y-f.t*60); ctx.globalAlpha=1; if(f.t>0.9) floats.splice(i,1); }
+  // runner HUD updates
+  document.getElementById('rScore').textContent=`Score ${state.rScore}`;
+  document.getElementById('rMetal').textContent=`Metal ${state.rMetal}`;
+  document.getElementById('rFood').textContent=`Food ${state.rFood}`;
+  document.getElementById('rAmmo').textContent=`Ammo ${state.ammo}`;
+  const bEl=document.getElementById('rBuff'); if(rState.buffTimer>0){ bEl.style.display='block'; bEl.textContent=`x${rState.buffMult} DAMAGE ${Math.ceil(rState.buffTimer)}s`; } else bEl.style.display='none';
+  // lane debug
+}
+function shake(dur,str){
+  let t0=performance.now(); (function s(){
+    let p=(performance.now()-t0)/(dur*1000); if(p>1){ canvas.style.transform=''; return; }
+    canvas.style.transform=`translate(${(Math.random()-0.5)*str}px,${(Math.random()-0.5)*str}px)`; requestAnimationFrame(s);
+  })();
+}
+function runnerGameOver(won){
+  state.gameOver=true; state.running=false;
+  const overlay=document.getElementById('runnerOverlay');
+  overlay.style.display='flex';
+  if(won){
+    overlay.innerHTML=`<h2 style="color:#22c55e">Cleared!</h2><div>+${state.rFood} Food +${state.rMetal} Metal</div><div class="row"><button class="btn btn-primary" id="toMapAfter">→ Map</button><button class="btn btn-secondary" id="toBaseAfter">→ Base</button></div>`;
+  } else {
+    overlay.innerHTML=`<h2>GAME OVER</h2><div>Score ${state.rScore} — Zombies ${state.rMetal/5|0}</div><div class="row"><button class="btn btn-primary" id="retryBtn">Retry</button><button class="btn btn-secondary" id="toMapAfter2">Map</button><button class="btn btn-secondary" id="toBaseAfter2">Base</button></div>`;
+  }
+  // merge to base resources on win, even on loss we keep some?
+  if(won){
+    state.food+=state.rFood; state.metal+=state.rMetal; save(); updateTop(); syncResources(); onRunnerVictory();
+  }
+  document.getElementById('toMapAfter')?.addEventListener('click',()=>{ overlay.style.display='none'; showScreen('mapScreen'); });
+  document.getElementById('toBaseAfter')?.addEventListener('click',()=>{ overlay.style.display='none'; showScreen('baseScreen'); });
+  document.getElementById('retryBtn')?.addEventListener('click',()=>{ overlay.style.display='none'; startRunner(); });
+  document.getElementById('toMapAfter2')?.addEventListener('click',()=>{ overlay.style.display='none'; showScreen('mapScreen'); });
+  document.getElementById('toBaseAfter2')?.addEventListener('click',()=>{ overlay.style.display='none'; showScreen('baseScreen'); });
+}
+// win condition for demo: survive 25s
+let winTimer=0;
+setInterval(()=>{ if(state.running && !state.gameOver){ winTimer+=1; if(winTimer>25){ winTimer=0; runnerGameOver(true); } } },1000);
+function showToast(t,cls=''){ const el=document.createElement('div'); el.textContent=t; el.style.cssText='position:fixed;top:46px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.75);padding:6px 12px;border-radius:999px;font-size:12px;z-index:99'; document.body.appendChild(el); setTimeout(()=>el.remove(),1600); }
+
+// --- Screen routing ---
+function showScreen(id){
+  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+}
+document.getElementById('goBaseBtn').addEventListener('click',()=> showScreen('baseScreen'));
+document.getElementById('goMapBtn').addEventListener('click',()=> showScreen('mapScreen'));
+document.getElementById('goRunnerBtn').addEventListener('click',()=> { showScreen('runnerScreen'); startRunner(); });
+document.getElementById('toMapBtn2').addEventListener('click',()=> showScreen('mapScreen'));
+document.getElementById('backBaseBtn').addEventListener('click',()=> showScreen('baseScreen'));
+document.getElementById('toRunnerBtn').addEventListener('click',()=> { showScreen('runnerScreen'); startRunner(); });
+
+// --- Init ---
+function startRunner(diff=1){
+  winTimer=0; state.running=true; state.gameOver=false; rState.hp=100; rState.buffMult=1; rState.buffTimer=0;
+  bullets=[]; enemies=[]; barrels=[]; document.getElementById('runnerOverlay').style.display='none';
+  laneIdx=1; laneXcur=laneX(1); laneTarget=laneX(1);
+}
+loadSave();
+buildGrid(); initMap(); recalc(); updateTop();
+showToast('Deadzone Unified — Base → Map → Runner','');
+// tick generation
+setInterval(()=>{ if(state.food_ps||state.metal_ps){ state.accum_food+=state.food_ps; state.accum_metal+=state.metal_ps; let af=Math.floor(state.accum_food), am=Math.floor(state.accum_metal); if(af){ state.accum_food-=af; state.food+=af; } if(am){ state.accum_metal-=am; state.metal+=am; } save(); updateTop(); renderBuildings(); } // refresh timers
+  // refresh building timers display
+  renderBuildings();
+},1000);
+// auth UI (reuse previous)
+function renderAuth(){
+  const card=document.getElementById('authCard');
+  const has=isValid(auth.token);
+  const user=auth.user?.username||'Guest';
+  if(has){
+    card.innerHTML=`<div style="font-weight:800">Welcome ${user} — Synced</div><div class="muted">HQ Lv.${state.hqLevel} • ${API.replace('https://','')}</div><div class="row" style="margin-top:8px"><button class="btn btn-secondary btn-small" id="logoutBtn">Logout</button><button class="btn btn-secondary btn-small" id="playGuestBtn">Play as Guest</button></div>`;
+  } else {
+    card.innerHTML=`<input id="email" placeholder="Email" value=""><input id="password" type="password" placeholder="Password"><div class="row"><button class="btn btn-primary" id="loginBtn">Login</button><button class="btn btn-secondary" id="registerBtn">Register</button></div><div id="authMsg" class="msg"></div><button class="btn btn-secondary btn-small" id="guestBtn" style="margin-top:8px;width:100%">Play as Guest</button>`;
+    setTimeout(()=>{
+      document.getElementById('loginBtn')?.addEventListener('click', doLogin);
+      document.getElementById('registerBtn')?.addEventListener('click', doRegister);
+      document.getElementById('guestBtn')?.addEventListener('click', ()=>{ showToast('Guest — local only'); });
+    },50);
+  }
+  document.getElementById('logoutBtn')?.addEventListener('click',()=>{ localStorage.removeItem('dz_token'); localStorage.removeItem('dz_user'); auth.token=''; auth.user=null; updateTop(); renderAuth(); });
+}
+async function doLogin(){
+  const email=document.getElementById('email').value.trim(), pass=document.getElementById('password').value.trim(), msg=document.getElementById('authMsg');
+  if(!email||!pass){ msg.textContent='Fill fields'; msg.className='msg err'; return; }
+  msg.textContent='Logging in…';
+  try{
+    const r=await fetch(API+'/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password:pass})});
+    const j=await r.json(); if(!r.ok) throw new Error(j.message);
+    localStorage.setItem('dz_token',j.token); localStorage.setItem('dz_user',JSON.stringify(j.user)); auth.token=j.token; auth.user=j.user; updateTop(); renderAuth(); showToast('Logged in '+j.user.username,'ok');
+  }catch(e){ msg.textContent='❌ '+e.message; msg.className='msg err'; }
+}
+async function doRegister(){
+  const email=document.getElementById('email').value.trim(), pass=document.getElementById('password').value.trim(), msg=document.getElementById('authMsg');
+  if(!email||!pass){ msg.textContent='Fill fields'; return; }
+  const username=email.split('@')[0].replace(/[^a-zA-Z0-9]/g,'').slice(0,20)||'player'+Math.floor(Math.random()*999);
+  msg.textContent='Registering…';
+  try{
+    const r=await fetch(API+'/api/auth/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username,email,password:pass,continent_id:1})});
+    const j=await r.json(); if(!r.ok) throw new Error(j.message);
+    localStorage.setItem('dz_token',j.token); localStorage.setItem('dz_user',JSON.stringify(j.user)); auth.token=j.token; auth.user=j.user; updateTop(); renderAuth(); showToast('Registered '+j.user.username,'ok');
+  }catch(e){ msg.textContent='❌ '+e.message; }
+}
+function syncSession(){
+  if(!auth.token || !auth.userId) return;
+  fetch(API+'/api/session',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+auth.token},body:JSON.stringify({x:Math.round(laneXcur),y:550,zone:'base_map',status: state.gameOver?'offline':'online',health:state.health||100})}).catch(()=>{});
+}
+updateTop(); renderAuth();
+requestAnimationFrame(function l(now){ requestAnimationFrame(l); let dt=Math.min(0.033,(now-(last||now))/1000); last=now; if(state.running && !state.gameOver){ /* loop already via runner */ } });
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
