@@ -116,6 +116,11 @@ func save_game():
 	if grid:
 		for b in grid.get_all_buildings():
 			data["buildings"].append(b.to_save_dict())
+		# Tutorial state (persist even if closed)
+	var tut = get_node_or_null("/root/Tutorial")
+	if tut:
+		data["tutorial_step"] = tut.step
+		data["tutorial_done"] = tut.completed
 	var f = FileAccess.open(SAVE_PATH, FileAccess.WRITE)
 	if f: f.store_string(JSON.stringify(data,"\t"))
 
@@ -138,7 +143,13 @@ func _load_save():
 	_pending_offline = offline
 	# Don't apply generation yet — wait for grid to exist, then Base will call apply_pending()
 
-var _pending_buildings: Array = []
+var tut_state = json.get("tutorial_step", -1)
+	if tut_state != -1:
+		var tut = get_node_or_null("/root/Tutorial")
+		if tut:
+			tut.step = int(json.get("tutorial_step", 0))
+			tut.completed = bool(json.get("tutorial_done", false))
+	var _pending_buildings: Array = []
 var _pending_offline: float = 0
 
 func apply_pending_to_grid(grid: Node):
